@@ -1,0 +1,160 @@
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: ipfs-cluster
+  labels:
+    app: ipfs-cluster
+spec:
+  type: LoadBalancer
+  ports:
+  - name: swarm
+    targetPort: 4001
+    port: 4001
+  - name: swarm-udp
+    targetPort: 4002
+    port: 4002
+  - name: api
+    targetPort: 5001
+    port: 5001
+  - name: ws
+    targetPort: 8081
+    port: 8081
+  - name: http
+    targetPort: 8080
+    port: 8080
+  - name: api-http
+    targetPort: 9094
+    port: 9094
+  - name: proxy-http
+    targetPort: 9095
+    port: 9095
+  - name: cluster-swarm
+    targetPort: 9096
+    port: 9096
+  selector:
+    app: ipfs-cluster
+  #loadBalancerSourceRanges:
+  #  - "255.255.255.255/32"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ipfs-cluster
+spec:
+  serviceName: ipfs-cluster
+  replicas: 20
+  selector:
+    matchLabels:
+      app: ipfs-cluster
+  template:
+    metadata:
+      labels:
+        app: ipfs-cluster
+    spec:
+      containers:
+        - name: ipfs
+          image: "ipfs/go-ipfs:v0.5.0"
+          command: ["sh", "/custom/configure-ipfs.sh"]
+          imagePullPolicy: IfNotPresent
+          #resources:
+          #  requests:
+          #    cpu: "75m"
+          #  limits:
+          #    cpu: "75m"
+          env:
+            - name: IPFS_FD_MAX
+              value: "4096"
+          ports:
+            - name: swarm
+              protocol: TCP
+              containerPort: 4001
+            - name: swarm-udp
+              protocol: UDP
+              containerPort: 4002
+            - name: api
+              protocol: TCP
+              containerPort: 5001
+            - name: ws
+              protocol: TCP
+              containerPort: 8081
+            - name: http
+              protocol: TCP
+              containerPort: 8080
+          volumeMounts:
+            - name: ipfs-storage
+              mountPath: /data/ipfs
+            - name: configure-script
+              mountPath: /custom
+        - name: ipfs-cluster
+          image: "ipfs/ipfs-cluster:v0.12.1"
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "/custom/entrypoint.sh"]
+          #resources:
+          #  requests:
+          #    cpu: "100m"
+          #  limits:
+          #    cpu: "100m"
+          env:
+            - name: BOOTSTRAP_PEER_ID
+              value: "12D3KooWLqPvCZY59mXfTmPmMbAsNPYf1zxVLPgJeDX7dw1TCtXx"
+            - name: BOOTSTRAP_PEER_PRIV_KEY
+              value: "CAESQFJHhVxpEBdbZAY7pl+dT0qEYmmH+H1r5ZDVmkGNECfWo7QdZ+RjVpbhWBBKVzTVCd2oBpUvw7mqaOoqqIiF/gc="
+            - name: CLUSTER_SECRET
+              value: "f6cccc4beb91fcd5a0a2cecaf5eb23621163e89227ce82ad420d1d72f6b93b34"
+            - name: CLUSTER_MONITORPINGINTERVAL
+              value: "3m"
+            - name: SVC_NAME
+              value: $(CLUSTER_SVC_NAME)
+            - name: CLUSTER_REPLICATIONFACTORMIN
+              value: "3"
+            - name: CLUSTER_REPLICATIONFACTORMAX
+              value: "3"
+            #- name: CLUSTER_LISTENMULTIADDRESS
+            #  value: "/ip4/0.0.0.0/tcp/9096"
+            - name: CLUSTER_IPFSPROXY_LISTENMULTIADDRESS
+              value: "/ip4/0.0.0.0/tcp/9095"
+            - name: CLUSTER_IPFSPROXY_NODEMULTIADDRESS
+              value: "/ip4/0.0.0.0/tcp/5001"
+            - name: CLUSTER_RESTAPI_HTTPLISTENMULTIADDRESS
+              value: "/ip4/0.0.0.0/tcp/9094"
+           # - name : CLUSTER_IPFSHTTP_LISTENMULTIADDRESS
+           #   value: "/ip4/0.0.0.0/tcp/9095"
+           # - name: CLUSTER_IPFSHTTP_NODEMULTIADDRESS
+           #   value: "/ip4/0.0.0.0/tcp/5001"
+          ports:
+            - name: api-http
+              containerPort: 9094
+              protocol: TCP
+            - name: proxy-http
+              containerPort: 9095
+              protocol: TCP
+            - name: cluster-swarm
+              containerPort: 9096
+              protocol: TCP
+          volumeMounts:
+            - name: cluster-storage
+              mountPath: /data/ipfs-cluster
+            - name: configure-script
+              mountPath: /custom
+      volumes:
+      - name: configure-script
+        configMap:
+          name: ipfs-cluster-set-bootstrap-conf      
+  volumeClaimTemplates:
+    - metadata:
+        name: cluster-storage
+      spec:
+        storageClassName: standard
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi  
+    - metadata:
+        name: ipfs-storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+

@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ipfs-cluster-set-bootstrap-conf
+data:
+  entrypoint.sh: |
+    #!/bin/sh
+    user=ipfs
+
+    # This is a custom entrypoint for k8s designed to connect to the bootstrap
+    # node running in the cluster. It has been set up using a configmap to
+    # allow changes on the fly.
+    
+    if [ ! -f /data/ipfs-cluster/service.json ]; then
+      ipfs-cluster-service init
+    fi
+
+    PEER_HOSTNAME=`cat /proc/sys/kernel/hostname`
+
+    grep -q ".*ipfs-cluster-0.*" /proc/sys/kernel/hostname
+    if [ $? -eq 0 ]; then
+      CLUSTER_ID=${BOOTSTRAP_PEER_ID} \
+      CLUSTER_PRIVATEKEY=${BOOTSTRAP_PEER_PRIV_KEY} \
+      ipfs-cluster-service daemon
+    else
+      BOOTSTRAP_ADDR=/dns4/${SVC_NAME}-0.${SVC_NAME}.default.svc.cluster.local/tcp/9096/ipfs/${BOOTSTRAP_PEER_ID}
+
+      if [ -z $BOOTSTRAP_ADDR ]; then
+        exit 1
+      fi
+      # Only ipfs user can get here
+      ipfs-cluster-service daemon --bootstrap $BOOTSTRAP_ADDR
+      #exec /bin/sh -c "trap : TERM INT; (while true; do sleep 1000; done) & wait"
+    fi
+
+  configure-ipfs.sh: |
+    #!/bin/sh
+    set -e
+    set -x
+    user=ipfs
+    # This is a custom entrypoint for k8s designed to run ipfs nodes in an appropriate
+    # setup for production scenarios.
+
+    mkdir -p /data/ipfs && chown -R ipfs /data/ipfs
+
+    if [ -f /data/ipfs/config ]; then
+      if [ -f /data/ipfs/repo.lock ]; then
+        rm /data/ipfs/repo.lock
+      fi
+      rm /data/ipfs/config
+      #exit 0
+    fi
+    cp -v /custom/swarm.key /data/ipfs/swarm.key
+    ipfs init --profile=badgerds,server
+    ipfs bootstrap rm --all
+    ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001
+    ipfs config Addresses.Gateway /ip4/0.0.0.0/tcp/8080
+    ipfs config --json Swarm.ConnMgr.HighWater 2000
+    ipfs config --json Datastore.BloomFilterSize 1048576
+    ipfs config Datastore.StorageMax 100GB
+    ipfs daemon
+
+  swarm.key: |
+    /key/swarm/psk/1.0.0/
+    /base16/
+    2ac0cc4957c00bce8b4d248944c98edf81f4d57d5923c5467c61f1e93f3c0995
